@@ -39,7 +39,7 @@ class S4BXIWorker {
   busy = false;
 }
 
-const workers: S4BXIWorker[] = [];
+const workerPool: S4BXIWorker[] = [];
 
 /**
  * Util function to sleep. Obviously await it or it won't do anything
@@ -49,23 +49,66 @@ async function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function killWorker(w: S4BXIWorker) {
+  console.log("Terminating worker");
+  console.table(workerPool);
+  const workerIndex = workerPool.indexOf(w);
+  w.worker.terminate();
+  if (workerIndex == -1) {
+    console.error(
+      "Terminating a worker that wasn't present in the worker pool",
+    );
+  } else {
+    workerPool.splice(workerPool.indexOf(w), 1);
+  }
+}
+
 /**
  * Take a job in our command list and give it to a worker
  * @param selectedWorker Optionnal, if set this worker will be used instead of searching for one
  */
 function scheduleNextJob(selectedWorker?: S4BXIWorker) {
   const command = commands.pop();
-  if (command) {
-    const w = selectedWorker || workers.find(({ busy }) => !busy);
 
-    if (!w) { // No worker found, should not happen
-      console.error("No available worker found");
-      commands.push(command);
-      return;
+  // No command left
+  if (!command) {
+    // If the request comes from a worker, kill it, we don't need it anymore
+    if (selectedWorker) {
+      killWorker(selectedWorker);
     }
 
-    w.busy = true;
-    w.worker.postMessage({ command: command });
+    return;
+  }
+
+  const w = selectedWorker || workerPool.find(({ busy }) => !busy);
+
+  if (!w) { // No worker found, should not happen
+    console.error("No available worker found");
+    commands.push(command);
+    return;
+  }
+
+  w.busy = true;
+  w.worker.postMessage({ command: command });
+}
+
+function terminateSession() {
+  for (const w of workerPool) {
+    killWorker(w);
+  }
+
+  console.log("All jobs finished");
+}
+
+function workerDoneWorking(w: S4BXIWorker) {
+  w.busy = false;
+  if (commands.length) {
+    scheduleNextJob(w);
+  } else { // No more commands
+    killWorker(w);
+    if (!workerPool.find(({ busy }) => busy)) { // No more busy workers either
+      terminateSession();
+    }
   }
 }
 
@@ -79,14 +122,13 @@ function createWorker() {
 
   w.worker.addEventListener("message", (e: MessageEvent) => {
     if (e.data.done) {
-      w.busy = false;
-      scheduleNextJob(w);
+      workerDoneWorking(w);
     } else {
       console.error("Unrecognized message from worker");
     }
   });
 
-  workers.push(w);
+  workerPool.push(w);
 }
 
 // Main script: create workers and start initial tasks
