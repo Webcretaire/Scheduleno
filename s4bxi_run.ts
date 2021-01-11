@@ -1,10 +1,13 @@
 import { exec, OutputMode } from "https://deno.land/x/exec/mod.ts";
+import Mutex from "https://deno.land/x/await_mutex@v1.0.1/mod.ts";
 
 // Make sure we have a list of commands to run
 if (Deno.args.length != 1) {
   console.error("This script requires exactly one parameter");
   Deno.exit(1);
 }
+
+const createWorkerMutex = new Mutex();
 
 const commandScript: string = await Deno.readTextFile(Deno.args[0].toString()); // Read whole command file
 const commands: string[] = commandScript
@@ -37,6 +40,10 @@ class S4BXIWorker {
     },
   );
   busy = false;
+  postCommand(command: string) {
+    this.busy = true;
+    this.worker.postMessage({ command: command, timeout: "30m" });
+  }
 }
 
 const workerPool: S4BXIWorker[] = [];
@@ -51,7 +58,6 @@ async function sleep(ms: number) {
 
 function killWorker(w: S4BXIWorker) {
   console.log("Terminating worker");
-  console.table(workerPool);
   const workerIndex = workerPool.indexOf(w);
   w.worker.terminate();
   if (workerIndex == -1) {
@@ -80,16 +86,15 @@ function scheduleNextJob(selectedWorker?: S4BXIWorker) {
     return;
   }
 
-  const w = selectedWorker || workerPool.find(({ busy }) => !busy);
+  const worker = selectedWorker || workerPool.find(({ busy }) => !busy);
 
-  if (!w) { // No worker found, should not happen
+  if (!worker) { // No worker found, should not happen
     console.error("No available worker found");
     commands.push(command);
     return;
   }
 
-  w.busy = true;
-  w.worker.postMessage({ command: command });
+  worker.postCommand(command);
 }
 
 function terminateSession() {
@@ -100,12 +105,12 @@ function terminateSession() {
   console.log("All jobs finished");
 }
 
-function workerDoneWorking(w: S4BXIWorker) {
-  w.busy = false;
+function workerDoneWorking(worker: S4BXIWorker) {
+  worker.busy = false;
   if (commands.length) {
-    scheduleNextJob(w);
+    scheduleNextJob(worker);
   } else { // No more commands
-    killWorker(w);
+    killWorker(worker);
     if (!workerPool.find(({ busy }) => busy)) { // No more busy workers either
       terminateSession();
     }
@@ -115,13 +120,20 @@ function workerDoneWorking(w: S4BXIWorker) {
 /**
  * Create a new worker in a separate thread
  */
-function createWorker() {
+async function createWorker() {
+  const acquisitionId = await createWorkerMutex.acquire();
+
+  await sleep(500); // Don't create them too quickly or Deno explodes
+
   console.log("Creating worker");
 
   const w = new S4BXIWorker();
 
   w.worker.addEventListener("message", (e: MessageEvent) => {
     if (e.data.done) {
+      if (e.data.timeout) {
+        console.error("Worker got a timeout");
+      }
       workerDoneWorking(w);
     } else {
       console.error("Unrecognized message from worker");
@@ -129,16 +141,16 @@ function createWorker() {
   });
 
   workerPool.push(w);
+
+  createWorkerMutex.release(acquisitionId);
+
+  return w;
 }
 
 // Main script: create workers and start initial tasks
 
-createWorker();
-await sleep(1000); // Very important to make sure Deno has read the whole worker file, or it will explode
-
-for (let i = 1; i < maxParallelProcesses; ++i) {
-  createWorker();
-  await sleep(100); // Don't create them too quickly or Deno explodes
+for (let i = 0; i < maxParallelProcesses; ++i) {
+  await createWorker();
 }
 
 for (let i = 0; i < Math.min(maxParallelProcesses, commands.length); ++i) {
