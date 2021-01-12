@@ -73,7 +73,6 @@ export class Session {
     this.jobs = commandScript
       .split(/\r?\n/) // Split the file to get each individual lines
       .filter((c: string) => c.trim().length) // Remove empty commands
-      .reverse() // Reverse because we'll pop() them from the end
       .map((c: string) => new Job(c)); // And finally make nice Job objects
 
     const jobNumber: number = this.jobs.length;
