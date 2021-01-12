@@ -9,13 +9,16 @@ self.onmessage = async (e: MessageEvent) => {
   if (e.data.timeout) {
     bashCommand = `timeout ${e.data.timeout} ${bashCommand}`;
   }
+  const t0 = performance.now();
   const response = await exec(bashCommand, { output: OutputMode.StdOut });
+  const t1 = performance.now();
   await Deno.remove(commandFile);
   self.postMessage(
     {
       done: true,
       success: response.status.success,
       timeout: response.status.code == 124,
+      time: t1 - t0
     },
   );
 };

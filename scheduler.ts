@@ -14,12 +14,14 @@ export class Job {
   status: JobStatus;
   timeout: boolean;
   success: boolean;
+  time: number;
 
   constructor(command: string) {
     this.command = command;
     this.status = JobStatus.PENDING;
     this.timeout = false;
     this.success = false;
+    this.time = -1;
   }
 }
 
@@ -98,9 +100,12 @@ export class Session {
     if (this.progressTimeout) {
       clearTimeout(this.progressTimeout);
     }
-    // Make the next timeout date a bit random, otherwise some digits of the time don't change, 
+    // Make the next timeout date a bit random, otherwise some digits of the time don't change,
     // and that's ugly (it's the only reason really)
-    this.progressTimeout = setTimeout(() => this.renderProgress(), 1000 + Math.random() * 500);
+    this.progressTimeout = setTimeout(
+      () => this.renderProgress(),
+      1000 + Math.random() * 500,
+    );
 
     this.progress.render(
       this.jobs.filter(({ status }) => status == JobStatus.FINISHED).length,
@@ -165,6 +170,7 @@ export class Session {
         j.command.length > 50 ? `${j.command.substr(0, 47)}...` : j.command,
         "→",
         j.timeout ? red("timeout") : (j.success ? green("OK") : red("error")),
+        `(${j.time / 1000.0}s)`,
       )
     );
   }
@@ -203,6 +209,7 @@ export class Session {
         if (w.currentJob) {
           w.currentJob.timeout = e.data.timeout;
           w.currentJob.success = e.data.success;
+          w.currentJob.time = e.data.time;
         }
         this.workerDoneWorking(w);
       } else {
