@@ -2,7 +2,8 @@ import { exec, OutputMode } from "https://deno.land/x/exec/mod.ts";
 
 self.onmessage = async (e: MessageEvent) => {
   const command: string = e.data.command;
-  const commandFile = `./_worker_exec_${Math.random()}.sh`;
+  const randId: string = Math.random().toString(20).substr(2, 10);
+  const commandFile = `./_worker_exec_${randId}.sh`;
   await Deno.writeTextFile(commandFile, command);
   let bashCommand = `bash ${commandFile}`;
   if (e.data.timeout) {
