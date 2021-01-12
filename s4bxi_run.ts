@@ -1,5 +1,7 @@
 import { exec, OutputMode } from "https://deno.land/x/exec/mod.ts";
 import Mutex from "https://deno.land/x/await_mutex@v1.0.1/mod.ts";
+import ProgressBar from "https://deno.land/x/progress@v1.2.3/mod.ts";
+import { green, red } from "https://deno.land/std/fmt/colors.ts";
 
 // Make sure we have a list of commands to run
 if (Deno.args.length != 1) {
@@ -9,11 +11,45 @@ if (Deno.args.length != 1) {
 
 const createWorkerMutex = new Mutex();
 
+enum JobStatus {
+  PENDING,
+  STARTED,
+  FINISHED,
+}
+
+class Job {
+  command: string;
+  status: JobStatus;
+  timeout: boolean;
+
+  constructor(command: string) {
+    this.command = command;
+    this.status = JobStatus.PENDING;
+    this.timeout = false;
+  }
+}
+
 const commandScript: string = await Deno.readTextFile(Deno.args[0].toString()); // Read whole command file
-const commands: string[] = commandScript
+const jobs: Job[] = commandScript
   .split(/\r?\n/) // Split the file to get each individual lines
   .filter((c: string) => c.trim().length) // Remove empty commands
-  .reverse(); // Reverse because we'll pop() them from the end
+  .reverse() // Reverse because we'll pop() them from the end
+  .map((c: string) => new Job(c)); // And finally make nice Job objects
+
+const total = jobs.length;
+const progress = new ProgressBar({
+  total,
+  width: Deno.consoleSize(Deno.stdout.rid).columns,
+  complete: "=",
+  incomplete: " ",
+  display: ":completed/:total | :time [:bar] :percent",
+});
+
+function renderProgress() {
+  progress.render(
+    jobs.filter(({ status }) => status == JobStatus.FINISHED).length,
+  );
+}
 
 // Get number of cores on this machine
 const systemResponse = await exec(
@@ -32,17 +68,28 @@ const maxParallelProcesses = Math.max(
 const workerUrl = new URL("s4bxi_worker.ts", import.meta.url).href;
 
 class S4BXIWorker {
-  worker = new Worker(
-    workerUrl,
-    {
-      type: "module",
-      deno: true,
-    },
-  );
-  busy = false;
-  postCommand(command: string) {
-    this.busy = true;
-    this.worker.postMessage({ command: command, timeout: "30m" });
+  worker: Worker;
+  currentJob: Job | undefined;
+
+  submitJob(job: Job) {
+    this.currentJob = job;
+    this.worker.postMessage({ command: job.command, timeout: "3m" });
+    this.currentJob.status = JobStatus.STARTED;
+  }
+
+  get busy(): boolean {
+    return this.currentJob != undefined;
+  }
+
+  constructor(workerUrl: string) {
+    this.currentJob = undefined;
+    this.worker = new Worker(
+      workerUrl,
+      {
+        type: "module",
+        deno: true,
+      },
+    );
   }
 }
 
@@ -57,7 +104,6 @@ async function sleep(ms: number) {
 }
 
 function killWorker(w: S4BXIWorker) {
-  console.log("Terminating worker");
   const workerIndex = workerPool.indexOf(w);
   w.worker.terminate();
   if (workerIndex == -1) {
@@ -74,10 +120,10 @@ function killWorker(w: S4BXIWorker) {
  * @param selectedWorker Optionnal, if set this worker will be used instead of searching for one
  */
 function scheduleNextJob(selectedWorker?: S4BXIWorker) {
-  const command = commands.pop();
+  const job = jobs.find(({ status }) => status == JobStatus.PENDING);
 
-  // No command left
-  if (!command) {
+  // No jobs left
+  if (!job) {
     // If the request comes from a worker, kill it, we don't need it anymore
     if (selectedWorker) {
       killWorker(selectedWorker);
@@ -90,11 +136,11 @@ function scheduleNextJob(selectedWorker?: S4BXIWorker) {
 
   if (!worker) { // No worker found, should not happen
     console.error("No available worker found");
-    commands.push(command);
+    jobs.push(job);
     return;
   }
 
-  worker.postCommand(command);
+  worker.submitJob(job);
 }
 
 function terminateSession() {
@@ -102,12 +148,23 @@ function terminateSession() {
     killWorker(w);
   }
 
-  console.log("All jobs finished");
+  console.log("All jobs finished, here is the result:");
+  jobs.map((j: Job) =>
+    console.log(
+      j.command.length > 50 ? `${j.command.substr(0, 47)}...` : j.command,
+      "→",
+      j.timeout ? red("timeout") : green("OK"),
+    )
+  );
 }
 
 function workerDoneWorking(worker: S4BXIWorker) {
-  worker.busy = false;
-  if (commands.length) {
+  if (worker.currentJob) {
+    worker.currentJob.status = JobStatus.FINISHED;
+    worker.currentJob = undefined;
+    renderProgress();
+  }
+  if (jobs.find(({ status }) => status == JobStatus.PENDING)) {
     scheduleNextJob(worker);
   } else { // No more commands
     killWorker(worker);
@@ -122,17 +179,14 @@ function workerDoneWorking(worker: S4BXIWorker) {
  */
 async function createWorker() {
   const acquisitionId = await createWorkerMutex.acquire();
+  await sleep(100); // Don't create them too quickly or Deno explodes
 
-  await sleep(500); // Don't create them too quickly or Deno explodes
-
-  console.log("Creating worker");
-
-  const w = new S4BXIWorker();
+  const w = new S4BXIWorker(workerUrl);
 
   w.worker.addEventListener("message", (e: MessageEvent) => {
     if (e.data.done) {
-      if (e.data.timeout) {
-        console.error("Worker got a timeout");
+      if (e.data.timeout && w.currentJob) {
+        w.currentJob.timeout = true;
       }
       workerDoneWorking(w);
     } else {
@@ -142,10 +196,13 @@ async function createWorker() {
 
   workerPool.push(w);
 
+  await sleep(100);
   createWorkerMutex.release(acquisitionId);
 
   return w;
 }
+
+console.log(`Using ${maxParallelProcesses} worker(s)`);
 
 // Main script: create workers and start initial tasks
 
@@ -153,6 +210,8 @@ for (let i = 0; i < maxParallelProcesses; ++i) {
   await createWorker();
 }
 
-for (let i = 0; i < Math.min(maxParallelProcesses, commands.length); ++i) {
+renderProgress();
+
+for (let i = 0; i < Math.min(maxParallelProcesses, jobs.length); ++i) {
   scheduleNextJob();
 }
