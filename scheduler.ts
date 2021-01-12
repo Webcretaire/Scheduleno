@@ -57,12 +57,14 @@ export class Session {
   private progress: ProgressBar;
   private workerUrl: string;
   private workerPool: WorkerWrapper[];
+  private progressTimeout: number;
 
   constructor(
     commandScriptFilename: string,
     parallelWorkers: number,
     timeout: string,
   ) {
+    this.progressTimeout = 0;
     this.jobTimeout = timeout;
     this.requestedParallelWorkers = parallelWorkers;
 
@@ -89,7 +91,18 @@ export class Session {
     this.workerPool = [];
   }
 
+  /**
+   * Render progress bar
+   * Will be called either when something happens or every 1 to 1.5 seconds
+   */
   private renderProgress() {
+    if (this.progressTimeout) {
+      clearTimeout(this.progressTimeout);
+    }
+    // Make the next timeout date a bit random, otherwise some digits of the time don't change, 
+    // and that's ugly (it's the only reason really)
+    this.progressTimeout = setTimeout(() => this.renderProgress(), 1000 + Math.random() * 500);
+
     this.progress.render(
       this.jobs.filter(({ status }) => status == JobStatus.FINISHED).length,
     );
@@ -139,6 +152,10 @@ export class Session {
    * Final output when all jobs have been executed
    */
   private terminateSession() {
+    // Stop progress bar update, we're done
+    clearTimeout(this.progressTimeout);
+    this.progressTimeout = 0;
+
     for (const w of this.workerPool) {
       this.killWorker(w);
     }
