@@ -1,7 +1,11 @@
 import ProgressBar from "https://deno.land/x/progress@v1.2.3/mod.ts";
-import Mutex from "https://deno.land/x/await_mutex@v1.0.1/mod.ts";
 import { green, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
-import { chooseNumberOfWorkers, sleep } from "./util.ts";
+import {
+  exec,
+  IExecResponse,
+  OutputMode,
+} from "https://deno.land/x/exec/mod.ts";
+import { chooseNumberOfWorkers } from "./util.ts";
 
 export enum JobStatus {
   PENDING,
@@ -26,38 +30,52 @@ export class Job {
 }
 
 export class WorkerWrapper {
-  worker: Worker;
   currentJob: Job | undefined;
 
   submitJob(job: Job, timeout: string) {
     this.currentJob = job;
-    this.worker.postMessage({ command: job.command, timeout: timeout });
     this.currentJob.status = JobStatus.STARTED;
+
+    const randId: string = Math.random().toString(20).substr(2, 10);
+    const commandFile = `./_worker_exec_${randId}.sh`;
+
+    let t0: number, t1: number, response: IExecResponse;
+
+    return Promise.resolve()
+      .then(() => Deno.writeTextFile(commandFile, job.command))
+      .then(() => {
+        t0 = performance.now();
+        return exec(
+          `timeout ${timeout} bash ${commandFile}`,
+          { output: OutputMode.StdOut },
+        );
+      }).then((r: IExecResponse) => {
+        t1 = performance.now();
+        response = r;
+        return Deno.remove(commandFile);
+      })
+      .then(() => {
+        if (!this.currentJob) {
+          console.error("A worker finished even though it didn't have a job");
+          return;
+        }
+
+        this.currentJob.timeout = response.status.code == 124;
+        this.currentJob.success = response.status.success;
+        this.currentJob.time = t1 - t0;
+      });
   }
 
   get busy(): boolean {
     return this.currentJob != undefined;
-  }
-
-  constructor(workerUrl: string) {
-    this.currentJob = undefined;
-    this.worker = new Worker(
-      workerUrl,
-      {
-        type: "module",
-        deno: true,
-      },
-    );
   }
 }
 
 export class Session {
   private jobTimeout: string;
   private requestedParallelWorkers: number;
-  private createWorkerMutex: Mutex;
   private jobs: Job[];
   private progress: ProgressBar;
-  private workerUrl: string;
   private workerPool: WorkerWrapper[];
   private progressTimeout: number;
 
@@ -87,8 +105,6 @@ export class Session {
       display: ":completed/:total | :time [:bar] :percent",
     });
 
-    this.createWorkerMutex = new Mutex();
-    this.workerUrl = new URL("worker.ts", import.meta.url).href;
     this.workerPool = [];
   }
 
@@ -114,7 +130,6 @@ export class Session {
 
   private killWorker(w: WorkerWrapper) {
     const workerIndex = this.workerPool.indexOf(w);
-    w.worker.terminate();
     if (workerIndex == -1) {
       console.error(
         "Terminating a worker that wasn't present in the worker pool",
@@ -149,7 +164,8 @@ export class Session {
       return;
     }
 
-    worker.submitJob(job, this.jobTimeout);
+    worker.submitJob(job, this.jobTimeout)
+      .then(() => this.workerDoneWorking(worker));
   }
 
   /**
@@ -196,36 +212,6 @@ export class Session {
   }
 
   /**
-   * Create a new worker in a separate thread
-   */
-  private async createWorker() {
-    const acquisitionId = await this.createWorkerMutex.acquire();
-    await sleep(100); // Don't create them too quickly or Deno explodes
-
-    const w = new WorkerWrapper(this.workerUrl);
-
-    w.worker.addEventListener("message", (e: MessageEvent) => {
-      if (e.data.done) {
-        if (w.currentJob) {
-          w.currentJob.timeout = e.data.timeout;
-          w.currentJob.success = e.data.success;
-          w.currentJob.time = e.data.time;
-        }
-        this.workerDoneWorking(w);
-      } else {
-        console.error("Unrecognized message from worker");
-      }
-    });
-
-    this.workerPool.push(w);
-
-    await sleep(100);
-    this.createWorkerMutex.release(acquisitionId);
-
-    return w;
-  }
-
-  /**
    * Start the session: create workers and assign initial jobs
    */
   public async start() {
@@ -239,7 +225,7 @@ export class Session {
     // Main script: create workers and start initial tasks
 
     for (let i = 0; i < workersToStart; ++i) {
-      await this.createWorker();
+      this.workerPool.push(new WorkerWrapper);
     }
 
     this.renderProgress();

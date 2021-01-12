@@ -22,11 +22,3 @@ export function chooseNumberOfWorkers(): Promise<number> {
     )
   );
 }
-
-/**
- * Obviously await it or it won't do anything (actually it would act as a timer)
- * @param ms Number of milliseconds to sleep
- */
-export function sleep(ms: number): Promise<number> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
