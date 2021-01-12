@@ -17,9 +17,7 @@ const args: Args = parse(Deno.args, {
   },
 });
 
-const usageStr = `${
-  bold("Usage:")
-} deno run --allow-read --allow-write --allow-run --unstable scheduler_main.ts [OPTIONS] FILENAME`;
+const usageStr = `${bold("Usage:")} scheduleno [OPTIONS] FILENAME`;
 
 if (args.help) {
   console.log(
@@ -47,7 +45,11 @@ if (args.help) {
     "Timeout for each job, the expected format is similar to GNU's timeout utility. Defaults to 1 day (1d)",
   );
   console.log(" ");
-  console.log("  ", bold("--help (-h) :"), "Display this help message and exit");
+  console.log(
+    "  ",
+    bold("--help (-h) :"),
+    "Display this help message and exit",
+  );
 
   Deno.exit(0);
 }
@@ -59,7 +61,9 @@ if (args._.length != 1) {
     "This script requires a filename (command file)",
   );
   console.error(usageStr);
-  console.error("For more details run `deno run --unstable ./scheduler_main.ts --help`")
+  console.error(
+    "For more details run `./scheduleno --help`",
+  );
   Deno.exit(1);
 }
 

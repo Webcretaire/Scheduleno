@@ -1,7 +1,7 @@
 This small deno utility helps schedule jobs efficiently on a multi-core machine
  
-**Usage:** `deno run --allow-read --allow-write --allow-run --unstable scheduler_main.ts [OPTIONS] FILENAME`
- 
+**Usage:** `./scheduleno [OPTIONS] FILENAME`
+
 **FILENAME** is the path to a text file containing one commad per line, to be executed by workers
  
 **OPTIONS**  can include :
