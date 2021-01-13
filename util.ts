@@ -6,22 +6,17 @@ import {
 import { bold, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
 
 /**
- * Choose a number of workers based on the numbers of cores on the machine
+ * Choose a number of workers based on the numbers of *physical* cores on the machine
+ * A simple `grep -c processor /proc/cpuinfo` isn't what I want because it would give
+ * the number of threads, i.e. twice the number of physical cores in hyperthreaded systems
+ * Therefore we use `grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}'`, with
+ * backslashes escaped
  */
 export const chooseNumberOfWorkers = (): Promise<number> =>
-  // Get number of cores on this machine
   exec(
-    "grep -c processor /proc/cpuinfo",
+    `bash -c "grep ^cpu\\\\scores /proc/cpuinfo | uniq |  awk '{print $4}'"`,
     { output: OutputMode.Capture },
-  ).then((systemResponse: IExecResponse) =>
-    // Divide by two because most machine are hyperthreaded, and I don't like that
-    // Also subtract one so that the scheduler process has its own core
-    // Finally, Math.max(..., 1) to be sure we have at least one process (should always be the case but let's make sure anyways)
-    Math.max(
-      Math.floor(parseInt(systemResponse.output) / 2) - 1,
-      1,
-    )
-  );
+  ).then((systemResponse: IExecResponse) => parseInt(systemResponse.output));
 
 const usageStr = `${bold("Usage:")} scheduleno [OPTIONS] FILENAME`;
 
@@ -34,7 +29,7 @@ export const printHelp = () => {
   console.log("");
   console.log(
     bold("FILENAME"),
-    "is the path to a text file containing one commad per line, to be executed by workers",
+    "is the path to a text file containing one commad per line, to be executed by workers (through bash)",
   );
   console.log("");
   console.log(bold("OPTIONS"), " can include :");
