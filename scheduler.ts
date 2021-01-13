@@ -41,18 +41,21 @@ export class WorkerWrapper {
 
     let t0: number, t1: number, response: IExecResponse;
 
-    return Promise.resolve()
-      .then(() => Deno.writeTextFile(commandFile, job.command))
+    return Deno.writeTextFile(commandFile, job.command)
       .then(() => {
         t0 = performance.now();
         return exec(
           `timeout ${timeout} bash ${commandFile}`,
           { output: OutputMode.StdOut },
         );
-      }).then((r: IExecResponse) => {
+      })
+      .then((r: IExecResponse) => {
         t1 = performance.now();
         response = r;
         return Deno.remove(commandFile);
+      })
+      .catch(() => {
+        console.error(`Error while remove temp file ${commandFile}`);
       })
       .then(() => {
         if (!this.currentJob) {
@@ -60,9 +63,10 @@ export class WorkerWrapper {
           return;
         }
 
-        this.currentJob.timeout = response.status.code == 124;
-        this.currentJob.success = response.status.success;
         this.currentJob.time = t1 - t0;
+        this.currentJob.timeout = response.status.code == 124;
+        this.currentJob.success = response.status.success &&
+          response.status.code == 0;
       });
   }
 
@@ -128,6 +132,9 @@ export class Session {
     );
   }
 
+  /**
+   * Remove a worker from the pool
+   */
   private killWorker(w: WorkerWrapper) {
     const workerIndex = this.workerPool.indexOf(w);
     if (workerIndex == -1) {
@@ -225,7 +232,7 @@ export class Session {
     // Main script: create workers and start initial tasks
 
     for (let i = 0; i < workersToStart; ++i) {
-      this.workerPool.push(new WorkerWrapper);
+      this.workerPool.push(new WorkerWrapper());
     }
 
     this.renderProgress();
