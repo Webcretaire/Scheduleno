@@ -1,0 +1,15 @@
+sleep 4
+sleep 5
+sleep 3
+rm doesntexists
+sleep 4
+sleep 5
+sleep 3
+sleep 4
+sleep 5
+rm doesntexists
+sleep 3
+rm doesntexists
+sleep 4
+sleep 5
+sleep 3
