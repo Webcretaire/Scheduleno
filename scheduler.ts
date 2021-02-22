@@ -1,10 +1,5 @@
 import ProgressBar from "https://deno.land/x/progress@v1.2.3/mod.ts";
 import { green, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
-import {
-  exec,
-  IExecResponse,
-  OutputMode,
-} from "https://deno.land/x/exec/mod.ts";
 import { chooseNumberOfWorkers } from "./util.ts";
 
 export enum JobStatus {
@@ -15,6 +10,7 @@ export enum JobStatus {
 
 export class Job {
   command: string;
+  process: Deno.Process<Deno.RunOptions> | null;
   status: JobStatus;
   timeout: boolean;
   success: boolean;
@@ -26,6 +22,7 @@ export class Job {
     this.timeout = false;
     this.success = false;
     this.time = -1;
+    this.process = null;
   }
 }
 
@@ -39,35 +36,25 @@ export class WorkerWrapper {
     const randId: string = Math.random().toString(20).substr(2, 10);
     const commandFile = `./_worker_exec_${randId}.sh`;
 
-    let t0: number, t1: number, response: IExecResponse;
+    let t0: number, t1: number, status: Deno.ProcessStatus;
 
-    return Deno.writeTextFile(commandFile, job.command)
-      .then(() => {
-        t0 = performance.now();
-        return exec(
-          `timeout ${timeout} bash ${commandFile}`,
-          { output: OutputMode.StdOut },
-        );
-      })
-      .then((r: IExecResponse) => {
-        t1 = performance.now();
-        response = r;
-        return Deno.remove(commandFile);
-      })
-      .catch(() => {
-        console.error(`Error while remove temp file ${commandFile}`);
-      })
-      .then(() => {
-        if (!this.currentJob) {
-          console.error("A worker finished even though it didn't have a job");
-          return;
-        }
-
-        this.currentJob.time = t1 - t0;
-        this.currentJob.timeout = response.status.code == 124;
-        this.currentJob.success = response.status.success &&
-          response.status.code == 0;
+    return new Promise<void>((resolve, reject) => {
+      Deno.writeTextFileSync(commandFile, job.command);
+      t0 = performance.now();
+      job.process = Deno.run({
+        cmd: ["timeout", timeout, "bash", commandFile],
       });
+      job.process.status()
+        .then((status) => {
+          t1 = performance.now();
+          Deno.removeSync(commandFile);
+          job.time = t1 - t0;
+          job.timeout = status.code == 124;
+          job.success = status.success && status.code == 0;
+          resolve();
+        })
+        .catch(reject);
+    });
   }
 
   get busy(): boolean {
