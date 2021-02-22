@@ -33,4 +33,13 @@ const s = new Session(
   args["parallel-workers"],
   args.timeout,
 );
+
+const sig = Deno.signal(Deno.Signal.SIGINT);
+
+s.onCleanExit(() => sig.dispose());
 s.start();
+
+for await (const _ of sig) {
+  console.log("\n\nKilling all running workers before exit, please be patient");
+  s.emergencyStop();
+}

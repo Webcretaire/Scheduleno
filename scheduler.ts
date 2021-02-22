@@ -2,6 +2,8 @@ import ProgressBar from "https://deno.land/x/progress@v1.2.3/mod.ts";
 import { green, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
 import { chooseNumberOfWorkers } from "./util.ts";
 
+type voidFunc = () => void;
+
 export enum JobStatus {
   PENDING,
   STARTED,
@@ -34,7 +36,7 @@ export class WorkerWrapper {
     this.currentJob.status = JobStatus.STARTED;
 
     const randId: string = Math.random().toString(20).substr(2, 10);
-    const commandFile = `./_worker_exec_${randId}.sh`;
+    const commandFile = `./__scheduleno_worker_${randId}.sh`;
 
     let t0: number, t1: number, status: Deno.ProcessStatus;
 
@@ -47,6 +49,7 @@ export class WorkerWrapper {
       job.process.status()
         .then((status) => {
           t1 = performance.now();
+          job.process = null;
           Deno.removeSync(commandFile);
           job.time = t1 - t0;
           job.timeout = status.code == 124;
@@ -69,6 +72,7 @@ export class Session {
   private progress: ProgressBar;
   private workerPool: WorkerWrapper[];
   private progressTimeout: number;
+  private cleanExitCallback: voidFunc | null;
 
   constructor(
     commandScriptFilename: string,
@@ -78,6 +82,7 @@ export class Session {
     this.progressTimeout = 0;
     this.jobTimeout = timeout;
     this.requestedParallelWorkers = parallelWorkers;
+    this.cleanExitCallback = null;
 
     const commandScript = Deno.readTextFileSync(commandScriptFilename);
 
@@ -183,6 +188,10 @@ export class Session {
         `(${j.time / 1000.0}s)`,
       )
     );
+
+    if (this.cleanExitCallback) {
+      this.cleanExitCallback();
+    }
   }
 
   /**
@@ -203,6 +212,24 @@ export class Session {
         this.terminateSession();
       }
     }
+  }
+
+  public async emergencyStop() {
+    const kills: Promise<Deno.ProcessStatus>[] = [];
+
+    this.jobs.map((j) => {
+      if (j.process) {
+        kills.push(Deno.run({ cmd: ["kill", String(j.process.pid)] }).status());
+      }
+    });
+
+    await Promise.all(kills);
+
+    // Might be a bit brutal, but the pattern is very specific, doesn't seem excessively dangerous
+    await Deno.run({ cmd: ["bash", "-c", "rm ./__scheduleno_worker_*.sh"] })
+      .status();
+
+    Deno.exit(100);
   }
 
   /**
@@ -228,5 +255,9 @@ export class Session {
     for (let i = 0; i < initialJobsToStart; ++i) {
       this.scheduleNextJob();
     }
+  }
+
+  public onCleanExit(callback: voidFunc | null) {
+    this.cleanExitCallback = callback;
   }
 }

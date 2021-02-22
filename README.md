@@ -1,6 +1,6 @@
 This small Deno utility helps schedule jobs efficiently on a multi-core machine
 
-**Requirements:** Only runs on Linux systems where `bash`, `grep`, `uniq` and `awk` commands are available (so most Linux systems). Deno must be available in your PATH (if not you can run `scheduleno.ts` manually instead of the bash script `scheduleno`)
+**Requirements:** Only runs on Linux systems where `bash`, `kill`, `grep`, `uniq` and `awk` commands are available (so most Linux systems). Deno must be available in your PATH (if not you can run `scheduleno.ts` manually instead of the bash script `scheduleno`)
  
 **Usage:** `./scheduleno [OPTIONS] FILENAME`
 
