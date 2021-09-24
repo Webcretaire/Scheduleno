@@ -106,7 +106,7 @@ export class Session {
 
     this.progress = new ProgressBar({
       total: jobNumber,
-      width: Deno.consoleSize(Deno.stdout.rid).columns,
+      width: Deno.consoleSize(Deno.stdout.rid).columns - 30, // -30 because for some mysterious reason it can overflow sometimes
       complete: "=",
       incomplete: " ",
       display: ":completed/:total | :time [:bar] :percent",
@@ -212,7 +212,7 @@ export class Session {
 
   /**
    * Callback when a worker is done executing its current job
-   * @param worker 
+   * @param worker
    */
   private workerDoneWorking(worker: WorkerWrapper) {
     if (worker.currentJob) {
