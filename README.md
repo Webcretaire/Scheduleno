@@ -12,4 +12,6 @@ This small Deno utility helps schedule jobs efficiently on a multi-core machine
 
 - **--timeout (-t) :** Timeout for each job, the expected format is similar to GNU's timeout utility. Defaults to 1 day (1d)
 
+- **--safety-free-ram (-r) :** If the amount of free RAM on your system becomes lower than this value (specified in bytes), scheduleno will abort. Disabled by default (-1)
+
 - **--help (-h) :** Display help message and exit

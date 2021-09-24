@@ -1,6 +1,11 @@
 import ProgressBar from "https://deno.land/x/progress@v1.2.3/mod.ts";
 import { green, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
 import { chooseNumberOfWorkers } from "./util.ts";
+import {
+  exec,
+  IExecResponse,
+  OutputMode,
+} from "https://deno.land/x/exec@0.0.5/mod.ts";
 
 type voidFunc = () => void;
 
@@ -38,7 +43,7 @@ export class WorkerWrapper {
     const randId: string = Math.random().toString(20).substr(2, 10);
     const commandFile = `./__scheduleno_worker_${randId}.sh`;
 
-    let t0: number, t1: number, status: Deno.ProcessStatus;
+    let t0: number, t1: number;
 
     return new Promise<void>((resolve, reject) => {
       Deno.writeTextFileSync(commandFile, job.command);
@@ -73,15 +78,21 @@ export class Session {
   private workerPool: WorkerWrapper[];
   private progressTimeout: number;
   private cleanExitCallback: voidFunc | null;
+  private isDying: boolean;
+  private safetyFreeRam: number;
+  private ramWatcher = 0;
 
   constructor(
     commandScriptFilename: string,
     parallelWorkers: number,
     timeout: string,
+    safetyFreeRam: number = -1,
   ) {
+    this.isDying = false;
     this.progressTimeout = 0;
     this.jobTimeout = timeout;
     this.requestedParallelWorkers = parallelWorkers;
+    this.safetyFreeRam = safetyFreeRam;
     this.cleanExitCallback = null;
 
     const commandScript = Deno.readTextFileSync(commandScriptFilename);
@@ -145,8 +156,8 @@ export class Session {
   private scheduleNextJob(selectedWorker?: WorkerWrapper) {
     const job = this.jobs.find(({ status }) => status == JobStatus.PENDING);
 
-    // No jobs left
-    if (!job) {
+    // No jobs left or currently terminating
+    if (this.isDying || !job) {
       // If the request comes from a worker, kill it, we don't need it anymore
       if (selectedWorker) {
         this.killWorker(selectedWorker);
@@ -174,6 +185,11 @@ export class Session {
     // Stop progress bar update, we're done
     clearTimeout(this.progressTimeout);
     this.progressTimeout = 0;
+
+    if (this.ramWatcher) {
+      clearInterval(this.ramWatcher);
+      this.ramWatcher = 0;
+    }
 
     for (const w of this.workerPool) {
       this.killWorker(w);
@@ -215,6 +231,8 @@ export class Session {
   }
 
   public async emergencyStop() {
+    this.isDying = true;
+
     const kills: Promise<Deno.ProcessStatus>[] = [];
 
     this.jobs.map((j) => {
@@ -230,6 +248,24 @@ export class Session {
       .status();
 
     Deno.exit(100);
+  }
+
+  private watchRamUsage(): Promise<void> {
+    return exec(`bash -c "free -b | grep Mem:"`, { output: OutputMode.Capture })
+      .then((
+        systemResponse: IExecResponse,
+      ) => {
+        const ramValues = systemResponse.output.split(" ").filter((s) =>
+          s.length
+        );
+        const freeRam = parseInt(ramValues[3]);
+        if (freeRam < this.safetyFreeRam) {
+          console.log(
+            `\n\nFree RAM dropped under the safety limit (${freeRam} < ${this.safetyFreeRam}), aborting`,
+          );
+          this.emergencyStop();
+        }
+      });
   }
 
   /**
@@ -251,8 +287,13 @@ export class Session {
 
     this.renderProgress();
 
-    const initialJobsToStart = Math.min(workersToStart, this.jobs.length);
-    for (let i = 0; i < initialJobsToStart; ++i) {
+    if (this.safetyFreeRam > 0) {
+      this.ramWatcher = setInterval(() => {
+        this.watchRamUsage();
+      }, 5000);
+    }
+
+    for (let i = 0; i < Math.min(workersToStart, this.jobs.length); ++i) {
       this.scheduleNextJob();
     }
   }

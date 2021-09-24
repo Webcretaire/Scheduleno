@@ -7,6 +7,7 @@ const args: Args = parse(Deno.args, {
     timeout: "t",
     help: "h",
     "parallel-workers": "p",
+    "safety-free-ram": "r",
   },
   boolean: ["help"],
   string: ["timeout"],
@@ -14,6 +15,7 @@ const args: Args = parse(Deno.args, {
     help: false,
     timeout: "1d",
     "parallel-workers": 0,
+    "safety-free-ram": -1,
   },
 });
 
@@ -32,9 +34,10 @@ const s = new Session(
   args._[0].toString(), // toString is redundant but it pleases TS
   args["parallel-workers"],
   args.timeout,
+  args["safety-free-ram"],
 );
 
-const sig = Deno.signal(Deno.Signal.SIGINT);
+const sig = Deno.signal("SIGINT");
 
 s.onCleanExit(() => sig.dispose());
 s.start();

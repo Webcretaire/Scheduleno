@@ -2,7 +2,7 @@ import {
   exec,
   IExecResponse,
   OutputMode,
-} from "https://deno.land/x/exec/mod.ts";
+} from "https://deno.land/x/exec@0.0.5/mod.ts";
 import { bold, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
 
 /**
@@ -44,6 +44,12 @@ export const printHelp = () => {
     "  ",
     bold("--timeout (-t) :"),
     "Timeout for each job, the expected format is similar to GNU's timeout utility. Defaults to 1 day (1d)",
+  );
+  console.log("");
+  console.log(
+    "  ",
+    bold("--safety-free-ram (-r) :"),
+    "If the amount of free RAM on your system becomes lower than this value (specified in bytes), scheduleno will abort. Disabled by default (-1)",
   );
   console.log("");
   console.log(
