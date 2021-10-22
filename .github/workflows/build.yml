@@ -1,0 +1,26 @@
+name: Build
+on:
+  push:
+    branches:
+      - master
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    container: debian
+    steps:
+      - name: Install basic apt dependencies
+        run: |
+          apt update
+          apt install -y curl unzip 
+      - name: Checkout project
+        uses: actions/checkout@v2
+      - name: Install and run Deno
+        run: |
+          curl -fsSL https://deno.land/x/install/install.sh | sh
+          $HOME/.deno/bin/deno compile --unstable -A -o ./scheduleno_linux ./scheduleno.ts
+      - name: Archive generated binary
+        uses: actions/upload-artifact@v2
+        with:
+          name: Linux binary
+          path: ./scheduleno_linux
