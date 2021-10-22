@@ -1,3 +1,7 @@
+# Scheduleno
+
+[![Build](https://github.com/Webcretaire/Scheduleno/actions/workflows/build.yml/badge.svg)](https://github.com/Webcretaire/Scheduleno/actions/workflows/build.yml)
+
 This small Deno utility helps schedule jobs efficiently on a multi-core machine
 
 **Requirements:** Only runs on Linux systems where `bash`, `kill`, `grep`, `uniq` and `awk` commands are available (so most Linux systems). Deno must be available in your PATH (if not you can run `scheduleno.ts` manually instead of the bash script `scheduleno`)
