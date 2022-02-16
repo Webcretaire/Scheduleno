@@ -37,12 +37,12 @@ const s = new Session(
   args["safety-free-ram"],
 );
 
-const sig = Deno.signal("SIGINT");
-
-s.onCleanExit(() => sig.dispose());
-s.start();
-
-for await (const _ of sig) {
+const sigint_handler = () => {
   console.log("\n\nKilling all running workers before exit, please be patient");
   s.emergencyStop();
-}
+};
+
+Deno.addSignalListener("SIGINT", sigint_handler);
+
+s.onCleanExit(() => Deno.removeSignalListener("SIGINT", sigint_handler));
+s.start();
