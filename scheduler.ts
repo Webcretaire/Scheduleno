@@ -1,5 +1,10 @@
 import ProgressBar from "https://deno.land/x/progress@v1.2.3/mod.ts";
-import { green, red } from "https://deno.land/std@0.79.0/fmt/colors.ts";
+import {
+  green,
+  magenta,
+  red,
+  yellow,
+} from "https://deno.land/std@0.79.0/fmt/colors.ts";
 import { chooseNumberOfWorkers } from "./util.ts";
 import {
   exec,
@@ -28,7 +33,7 @@ export class Job {
     this.status = JobStatus.PENDING;
     this.timeout = false;
     this.success = false;
-    this.time = -1;
+    this.time = 0;
     this.process = null;
   }
 }
@@ -178,6 +183,44 @@ export class Session {
       .then(() => this.workerDoneWorking(worker));
   }
 
+  private displayResult() {
+    let timeout_nb = 0, success_nb = 0, error_nb = 0, aborted_nb = 0;
+
+    this.jobs.map((j: Job) => {
+      let result_str: string;
+      if (j.status != JobStatus.FINISHED) {
+        result_str = magenta("aborted");
+        aborted_nb++;
+      } else if (j.timeout) {
+        result_str = yellow("timeout");
+        timeout_nb++;
+      } else if (j.success) {
+        result_str = green("OK");
+        success_nb++;
+      } else {
+        result_str = red("error");
+        error_nb++;
+      }
+      console.log(
+        j.command.length > 50 ? `${j.command.substr(0, 47)}...` : j.command,
+        "→",
+        result_str,
+        `(${j.time / 1000.0}s)`,
+      );
+    });
+
+    console.log(
+      "Summary: " +
+        green(`${success_nb} success`) +
+        ", " +
+        red(`${error_nb} error`) +
+        ", " +
+        yellow(`${timeout_nb} timeout`) +
+        ", " +
+        magenta(`${aborted_nb} aborted`),
+    );
+  }
+
   /**
    * Final output when all jobs have been executed
    */
@@ -196,14 +239,7 @@ export class Session {
     }
 
     console.log("All jobs finished, here is the result:");
-    this.jobs.map((j: Job) =>
-      console.log(
-        j.command.length > 50 ? `${j.command.substr(0, 47)}...` : j.command,
-        "→",
-        j.timeout ? red("timeout") : (j.success ? green("OK") : red("error")),
-        `(${j.time / 1000.0}s)`,
-      )
-    );
+    this.displayResult();
 
     if (this.cleanExitCallback) {
       this.cleanExitCallback();
@@ -230,9 +266,7 @@ export class Session {
     }
   }
 
-  public async emergencyStop() {
-    this.isDying = true;
-
+  private async killAllJobs(): Promise<void> {
     const kills: Promise<Deno.ProcessStatus>[] = [];
 
     this.jobs.map((j) => {
@@ -244,15 +278,24 @@ export class Session {
     await Promise.all(kills);
 
     // Might be a bit brutal, but the pattern is very specific, doesn't seem excessively dangerous
-    await Deno.run({ cmd: ["bash", "-c", "rm ./__scheduleno_worker_*.sh"] })
-      .status();
+    await Deno.run({
+      cmd: ["bash", "-c", "rm ./__scheduleno_worker_*.sh"],
+    }).status();
+  }
+
+  public async emergencyStop() {
+    this.isDying = true;
+
+    await this.killAllJobs();
+
+    this.displayResult();
 
     Deno.exit(100);
   }
 
-  private watchRamUsage(): Promise<void> {
+  private watchRamUsage() {
     return exec(`bash -c "free -b | grep Mem:"`, { output: OutputMode.Capture })
-      .then((
+      .then(async (
         systemResponse: IExecResponse,
       ) => {
         const ramValues = systemResponse.output.split(" ").filter((s) =>
@@ -263,7 +306,12 @@ export class Session {
           console.log(
             `\n\nFree RAM dropped under the safety limit (${freeRam} < ${this.safetyFreeRam}), aborting`,
           );
-          this.emergencyStop();
+
+          await this.killAllJobs();
+
+          this.displayResult();
+
+          Deno.exit(101);
         }
       });
   }
