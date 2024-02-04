@@ -111,7 +111,7 @@ export class Session {
 
     this.progress = new ProgressBar({
       total: jobNumber,
-      width: Deno.consoleSize(Deno.stdout.rid).columns - 30, // -30 because for some mysterious reason it can overflow sometimes
+      width: Deno.consoleSize().columns - 30, // -30 because for some mysterious reason it can overflow sometimes
       complete: "=",
       incomplete: " ",
       display: ":completed/:total | :time [:bar] :percent",
